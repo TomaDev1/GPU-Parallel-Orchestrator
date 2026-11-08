@@ -10,22 +10,23 @@ agents running at once.
 
 ## Status
 
-**Step 1 of 4: core coordinator.** Built and tested against a simulated
-batching backend. The target workstation (EPYC + 4 GPUs) isn't built yet.
+**Step 2 of 4 done.** Built and tested against simulated servers. The target
+workstation (EPYC + 4 GPUs, one model copy per GPU) isn't built yet.
 
 | Step | What | State |
 |---|---|---|
 | 1 | Task graph, dependency-driven scheduler, backend interface, simulator | done |
-| 2 | Batch-friendly submission: subagent spawning API, shared-prefix grouping | next |
-| 3 | Adaptive admission controller (tune concurrency from measured throughput) | planned |
+| 2 | Multiple servers (one per GPU), prefix-aware routing, subagent spawning API | done |
+| 3 | Adaptive admission controller: tune concurrency from measured throughput, budget prompt (prefill) tokens separately | next |
 | 4 | Per-task metrics store and timeline view | planned |
 
 ## How it works
 
 ```
-objective ──> TaskGraph (DAG) ──> Scheduler ──> Backend ──> inference server ──> GPUs
-                  ▲                    │
-                  └── new subtasks ────┘
+objective ──> TaskGraph (DAG) ──> Scheduler ──> BackendPool ──┬─> server on GPU 0
+                  ▲                    │        (prefix-aware  ├─> server on GPU 1
+                  └── then: spawn ─────┘         routing)      ├─> server on GPU 2
+                                                                └─> server on GPU 3
 ```
 
 - **TaskGraph** holds tasks and their dependencies. A task's prompt can be a
@@ -36,11 +37,23 @@ objective ──> TaskGraph (DAG) ──> Scheduler ──> Backend ──> infe
   finish, not when a whole stage does. Among ready tasks it picks the one with
   the longest estimated chain of work downstream (the critical path). If a
   task fails, only the tasks that depend on it are cancelled.
+- **Subagents**: give a task a `then(task, spawn)` callback. When the task
+  succeeds it can spawn subtasks (`spawn.task`), a merge step (`spawn.join`),
+  or both at once (`spawn.fan_out`). Spawned tasks depend on the parent,
+  inherit its system prompt, and get ids like `parent/child`.
+- **BackendPool** spreads requests across several servers, each with its own
+  concurrency limit. With `strategy="prefix"` (the default), requests that
+  share a prompt prefix (by default, the same system prompt) go to a server
+  that already has it cached, unless that server is more than
+  `max_imbalance` requests busier than the least-loaded one. Prompt
+  processing doesn't get faster with batching, so processing a long shared
+  prompt once per card instead of once per request is a large saving.
 - **Backends** expose `async complete(request)`:
   - `OpenAICompatibleBackend` calls `/chat/completions` on any compatible server.
   - `SimulatedBackend` is a fake continuous-batching server for development
     without GPUs. Per-request speed drops as more requests share the batch,
-    following a configurable speed curve.
+    following a configurable speed curve. It has a small prefix cache, and
+    several simulated servers can share one `SimClock`.
 
 ## Quick start
 
@@ -48,8 +61,24 @@ objective ──> TaskGraph (DAG) ──> Scheduler ──> Backend ──> infe
 pip install -e .[dev]
 python -m pytest
 python examples/demo_simulated.py      # no GPU needed
+python examples/demo_multi_gpu.py      # 4 simulated cards, routing strategies compared
 python examples/demo_server.py --base-url http://localhost:8000/v1 --model <name>
 ```
+
+Four servers, one per GPU (for example four vLLM instances on ports 8000-8003):
+
+```python
+from orchestrator import BackendPool, Endpoint, OpenAICompatibleBackend, Scheduler
+
+pool = BackendPool([
+    Endpoint(f"gpu{i}", OpenAICompatibleBackend(f"http://localhost:{8000 + i}/v1", "qwen"),
+             max_concurrency=16)
+    for i in range(4)
+])
+report = await Scheduler(pool, max_concurrency=pool.capacity).run(graph)
+```
+
+A single simulated server:
 
 ```python
 from orchestrator import Scheduler, SimulatedBackend, Task, TaskGraph
@@ -84,3 +113,18 @@ Two takeaways for later steps:
 2. A deep graph is limited by its critical path, so more concurrency stops
    helping early. Decomposing work into genuinely parallel subtasks matters
    as much as the scheduler.
+
+### Routing across 4 cards (`examples/demo_multi_gpu.py`)
+
+8 agent teams, each with its own ~6k-token shared system prompt, each
+planning then fanning out to 8 subtasks plus a merge (80 tasks). Each
+simulated card prefills at 1,800 tok/s, decodes at 46 tok/s alone and about
+16 tok/s each at 64 at once, and has KV room for 2 long prefixes. Those
+figures come from third-party RTX 3090 reports for a different model, so
+only the comparison between strategies is meaningful.
+
+| Strategy | Makespan | Prefix cache hits |
+|---|---|---|
+| round robin | 57.1s | 34 / 80 |
+| least loaded | 57.1s | 34 / 80 |
+| **prefix-aware** | **43.4s** | **53 / 80** |

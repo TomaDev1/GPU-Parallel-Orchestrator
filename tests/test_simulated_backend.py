@@ -46,3 +46,36 @@ def test_max_batch_queues_extra_requests():
 
     asyncio.run(main())
     assert be.peak_concurrency == 2
+
+
+def test_prefix_cache_skips_system_prefill():
+    from orchestrator import SimClock
+
+    async def run(cache_size):
+        be = SimulatedBackend(prefill_tps=1000, prefix_cache_size=cache_size,
+                              clock=SimClock(time_scale=1000, tick=0.01))
+        system = "s" * 8000  # 2000 tokens = 2s of prefill
+        await be.complete(Request("q", system=system, max_tokens=1))
+        second = await be.complete(Request("q", system=system, max_tokens=1))
+        return second
+
+    warm = asyncio.run(run(8))
+    cold = asyncio.run(run(0))
+    assert warm.cached_tokens == 2000 and cold.cached_tokens == 0
+    assert warm.ttft < 0.2 < cold.ttft
+
+
+def test_shared_clock_keeps_backends_in_step():
+    from orchestrator import SimClock
+
+    clock = SimClock(time_scale=1000, tick=0.01)
+    a = SimulatedBackend(speed_curve={1: 100.0}, prefill_tps=1e9, clock=clock)
+    b = SimulatedBackend(speed_curve={1: 100.0}, prefill_tps=1e9, clock=clock)
+
+    async def main():
+        await asyncio.gather(a.complete(Request("x", max_tokens=100)),
+                             b.complete(Request("x", max_tokens=100)))
+
+    asyncio.run(main())
+    # Two separate servers in parallel: both finish in ~1s, not 2s.
+    assert clock.now() == pytest.approx(1.0, abs=0.05)
