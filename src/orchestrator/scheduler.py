@@ -25,6 +25,7 @@ from typing import Awaitable, Callable
 
 from .backends import Backend, Request
 from .graph import Task, TaskGraph, TaskState
+from .spawn import Spawner
 
 TaskHook = Callable[[Task, TaskGraph], "Awaitable[None] | None"]
 
@@ -38,6 +39,9 @@ class TaskRecord:
     finished_at: float | None = None
     prompt_tokens: int = 0
     output_tokens: int = 0
+    cached_tokens: int = 0
+    endpoint: str | None = None
+    parent: str | None = None
     error: str | None = None
 
     @property
@@ -162,7 +166,7 @@ class Scheduler:
                     if fut is waiter:
                         continue
                     task = running.pop(fut)
-                    await self._finish(graph, task, fut, record(task), push)
+                    await self._finish(graph, task, fut, record(task), push, record)
         finally:
             graph.off_add(push)
             for fut in running:
@@ -177,10 +181,16 @@ class Scheduler:
     async def _execute(self, graph: TaskGraph, task: Task):
         prompt = task.build_prompt(graph.dep_outputs(task))
         return await self.backend.complete(
-            Request(prompt=prompt, system=task.system, max_tokens=task.max_tokens, task_id=task.id)
+            Request(
+                prompt=prompt,
+                system=task.system,
+                max_tokens=task.max_tokens,
+                task_id=task.id,
+                prefix_key=task.prefix_key,
+            )
         )
 
-    async def _finish(self, graph, task, fut, rec, push) -> None:
+    async def _finish(self, graph, task, fut, rec, push, record) -> None:
         rec.finished_at = self.clock()
         exc = fut.exception()
         if exc is not None:
@@ -192,9 +202,18 @@ class Scheduler:
         completion = fut.result()
         rec.prompt_tokens = completion.prompt_tokens
         rec.output_tokens = completion.output_tokens
+        rec.cached_tokens = completion.cached_tokens
+        rec.endpoint = completion.endpoint
         rec.state = TaskState.SUCCEEDED
         for child in graph.mark_succeeded(task, completion.text):
             push(child)
+        if task.then is not None:
+            spawner = Spawner(graph, task)
+            result = task.then(task, spawner)
+            if inspect.isawaitable(result):
+                await result
+            for child in spawner.spawned:
+                record(child).parent = task.id
         if self.on_task_done is not None:
             result = self.on_task_done(task, graph)
             if inspect.isawaitable(result):

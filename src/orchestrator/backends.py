@@ -10,9 +10,22 @@ from __future__ import annotations
 
 import asyncio
 import bisect
-import time
+import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Protocol
+
+
+def prefix_key_for(system: str | None) -> str | None:
+    """Default cache key for a request's reusable prefix: a hash of its system prompt.
+
+    Servers with prefix caching (vLLM, SGLang, llama.cpp) reuse the KV cache
+    for a prompt's leading tokens. Agents that share a system prompt (and any
+    shared context placed in it) share that prefix.
+    """
+    if not system:
+        return None
+    return hashlib.sha1(system.encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -21,6 +34,13 @@ class Request:
     system: str | None = None
     max_tokens: int = 512
     task_id: str | None = None
+    # Requests with the same key share a cacheable prefix. Defaults to a hash
+    # of the system prompt.
+    prefix_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.prefix_key is None:
+            self.prefix_key = prefix_key_for(self.system)
 
 
 @dataclass
@@ -30,6 +50,10 @@ class Completion:
     output_tokens: int = 0
     # Time from request start until the first output token, in seconds.
     ttft: float | None = None
+    # Which backend served the request (set by BackendPool).
+    endpoint: str | None = None
+    # Prompt tokens served from the prefix cache (simulator only).
+    cached_tokens: int = 0
 
 
 class Backend(Protocol):
@@ -111,6 +135,55 @@ class OpenAICompatibleBackend:
 DEFAULT_SPEED_CURVE: dict[int, float] = {1: 123.0, 2: 57.0, 4: 51.0, 8: 45.0}
 
 
+class SimClock:
+    """Shared simulated clock that steps one or more SimulatedBackends together.
+
+    Give every simulated server in a pool the same clock so their timelines
+    line up, and pass ``clock.now`` to the Scheduler.
+
+    ``time_scale`` speeds up the simulation: 100 means one simulated second
+    takes 10 ms of real time. Each tick advances simulated time by ``tick``
+    seconds, regardless of real-time jitter, so results are deterministic.
+    """
+
+    def __init__(self, time_scale: float = 1.0, tick: float = 0.05) -> None:
+        self.time_scale = time_scale
+        self.tick = tick
+        self._t = 0.0
+        self._backends: list["SimulatedBackend"] = []
+        self._loop_task: asyncio.Task | None = None
+        self._wake: asyncio.Event | None = None
+
+    def now(self) -> float:
+        return self._t
+
+    def register(self, backend: "SimulatedBackend") -> None:
+        self._backends.append(backend)
+
+    def poke(self) -> None:
+        """Called when a backend gets work; starts the tick loop if idle."""
+        if self._wake is None:
+            self._wake = asyncio.Event()
+        self._wake.set()
+        if self._loop_task is None or self._loop_task.done():
+            self._loop_task = asyncio.get_running_loop().create_task(self._run())
+
+    async def _run(self) -> None:
+        assert self._wake is not None
+        while True:
+            if not any(b._active for b in self._backends):
+                self._wake.clear()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    return  # idle; restarted by the next poke()
+                continue
+            await asyncio.sleep(self.tick / self.time_scale)
+            self._t += self.tick
+            for b in self._backends:
+                b._step(self.tick)
+
+
 @dataclass
 class _Active:
     request: Request
@@ -131,12 +204,17 @@ class SimulatedBackend:
     requests in prefill. New requests join the batch immediately (continuous
     batching).
 
-    ``time_scale`` speeds up the simulation: 100 means one simulated second
-    takes 10 ms of real time. Reported times in completions are simulated
-    seconds.
+    Time is simulated (see SimClock). Pass ``clock=`` to share one clock
+    between several simulated servers; otherwise each gets its own, built
+    from ``time_scale`` and ``tick``.
 
     Above ``max_batch`` concurrent requests, extra requests wait in a queue,
     like a server with a fixed number of batch slots.
+
+    Prefix caching: once a request with a given ``prefix_key`` has been
+    prefilled, later requests with the same key skip prefilling the system
+    prompt (an LRU of ``prefix_cache_size`` prefixes). Set the size to 0 to
+    disable.
     """
 
     def __init__(
@@ -147,6 +225,8 @@ class SimulatedBackend:
         time_scale: float = 1.0,
         tick: float = 0.05,
         chars_per_token: float = 4.0,
+        prefix_cache_size: int = 32,
+        clock: SimClock | None = None,
     ) -> None:
         curve = dict(sorted((speed_curve or DEFAULT_SPEED_CURVE).items()))
         if not curve or min(curve) < 1:
@@ -155,15 +235,16 @@ class SimulatedBackend:
         self._curve_v = list(curve.values())
         self.prefill_tps = prefill_tps
         self.max_batch = max_batch
-        self.time_scale = time_scale
-        self.tick = tick
+        self.clock = clock or SimClock(time_scale=time_scale, tick=tick)
+        self.clock.register(self)
         self.chars_per_token = chars_per_token
+        self.prefix_cache_size = prefix_cache_size
+        self._prefix_cache: OrderedDict[str, None] = OrderedDict()
+        self.cache_hits = 0
+        self.cache_misses = 0
 
         self._active: list[_Active] = []
         self._slots = asyncio.Semaphore(max_batch) if max_batch else None
-        self._loop_task: asyncio.Task | None = None
-        self._wake = asyncio.Event()
-        self._sim_time = 0.0
         self.peak_concurrency = 0
         self.total_output_tokens = 0
 
@@ -171,7 +252,7 @@ class SimulatedBackend:
 
     def now(self) -> float:
         """Current simulated time in seconds."""
-        return self._sim_time
+        return self.clock.now()
 
     def speed(self, n: int) -> float:
         """Per-request decode tokens/s with n requests decoding together.
@@ -203,21 +284,22 @@ class SimulatedBackend:
             await self._slots.acquire()
         try:
             loop = asyncio.get_running_loop()
-            prompt_tokens = self._tokens((request.system or "") + request.prompt)
+            system_tokens = self._tokens(request.system) if request.system else 0
+            prompt_tokens = system_tokens + self._tokens(request.prompt)
+            cached = system_tokens if self._cache_lookup(request.prefix_key) else 0
             # The simulator always generates max_tokens; set it to the expected length.
             target = request.max_tokens
             act = _Active(
                 request=request,
-                prefill_left=prompt_tokens,
+                prefill_left=prompt_tokens - cached,
                 decode_left=target,
                 target_tokens=target,
-                started=self._sim_time,
+                started=self.now(),
                 done=loop.create_future(),
             )
             self._active.append(act)
             self.peak_concurrency = max(self.peak_concurrency, len(self._active))
-            self._ensure_loop()
-            self._wake.set()
+            self.clock.poke()
             await act.done
             self.total_output_tokens += target
             text = f"[simulated output for {request.task_id or 'request'}: {target} tokens]"
@@ -225,30 +307,29 @@ class SimulatedBackend:
                 text=text,
                 prompt_tokens=prompt_tokens,
                 output_tokens=target,
-                ttft=(act.first_token_at or self._sim_time) - act.started,
+                ttft=(act.first_token_at or self.now()) - act.started,
+                cached_tokens=cached,
             )
         finally:
             if self._slots:
                 self._slots.release()
 
-    def _ensure_loop(self) -> None:
-        if self._loop_task is None or self._loop_task.done():
-            self._loop_task = asyncio.get_running_loop().create_task(self._run())
-
-    async def _run(self) -> None:
-        while True:
-            if not self._active:
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    return  # idle; the loop restarts on the next request
-                continue
-            await asyncio.sleep(self.tick / self.time_scale)
-            self._step(self.tick)
+    def _cache_lookup(self, key: str | None) -> bool:
+        """Return True on a hit; on a miss, insert the key (evicting LRU)."""
+        if key is None or self.prefix_cache_size <= 0:
+            return False
+        if key in self._prefix_cache:
+            self._prefix_cache.move_to_end(key)
+            self.cache_hits += 1
+            return True
+        self.cache_misses += 1
+        self._prefix_cache[key] = None
+        while len(self._prefix_cache) > self.prefix_cache_size:
+            self._prefix_cache.popitem(last=False)
+        return False
 
     def _step(self, dt: float) -> None:
-        self._sim_time += dt
+        """Advance this server by dt simulated seconds (called by SimClock)."""
         prefilling = [a for a in self._active if a.prefill_left > 0]
         decoding = [a for a in self._active if a.prefill_left <= 0]
         if prefilling:
@@ -259,7 +340,7 @@ class SimulatedBackend:
             per = self.speed(len(decoding)) * dt
             for a in decoding:
                 if a.first_token_at is None:
-                    a.first_token_at = self._sim_time
+                    a.first_token_at = self.now()
                 a.decode_left -= per
         finished = [a for a in self._active if a.prefill_left <= 0 and a.decode_left <= 0]
         for a in finished:

@@ -47,6 +47,10 @@ class Task:
     max_tokens: int = 512
     priority: int = 0  # higher runs first among equally critical tasks
     est_output_tokens: int | None = None  # used for critical-path ordering
+    # Cacheable-prefix key for routing; defaults to a hash of `system`.
+    prefix_key: str | None = None
+    # Called after this task succeeds, with a Spawner for adding subtasks.
+    then: Callable[["Task", Any], Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # Runtime state, managed by the graph/scheduler.
