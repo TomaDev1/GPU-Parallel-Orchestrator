@@ -120,6 +120,8 @@ class OpenAICompatibleBackend:
             text=data["choices"][0]["message"]["content"] or "",
             prompt_tokens=usage.get("prompt_tokens", 0),
             output_tokens=usage.get("completion_tokens", 0),
+            # vLLM fills this in when started with --enable-prompt-tokens-details.
+            cached_tokens=(usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0,
         )
 
     async def aclose(self) -> None:

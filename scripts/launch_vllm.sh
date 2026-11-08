@@ -91,6 +91,7 @@ for ((i = 0; i < NUM_GPUS; i++)); do
     --gpu-memory-utilization "$GPU_MEM" \
     --kv-cache-dtype "$KV_DTYPE" \
     --enable-prefix-caching \
+    --enable-prompt-tokens-details \
     ${EXTRA_ARGS:-} \
     > "$LOG_DIR/vllm-gpu$i.log" 2>&1 &
   echo $! > "$LOG_DIR/vllm-gpu$i.pid"

@@ -37,3 +37,21 @@ def test_sends_chat_completion_and_parses_response():
         {"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
     ]
     assert seen["body"]["max_tokens"] == 5
+
+
+def test_reads_cached_prompt_tokens():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 2000, "completion_tokens": 3,
+                      "prompt_tokens_details": {"cached_tokens": 1984}},
+        })
+
+    async def main():
+        be = OpenAICompatibleBackend("http://srv/v1", "qwen", transport=httpx.MockTransport(handler))
+        try:
+            return await be.complete(Request("hi", system="sys"))
+        finally:
+            await be.aclose()
+
+    assert asyncio.run(main()).cached_tokens == 1984
