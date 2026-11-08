@@ -5,6 +5,7 @@ On a rented multi-GPU machine (see README, "Testing on Vast.ai"):
     ./scripts/launch_vllm.sh                      # one vLLM server per GPU
     python scripts/bench.py                       # adaptive, two runs
     python scripts/bench.py --limits 4,8,16,32    # fixed limits first, then adaptive
+    python scripts/bench.py --unmanaged --limits "" --adaptive-runs 0   # baseline only
 
 Without GPUs (checks the script end to end on the 27B/3080 estimate):
 
@@ -120,8 +121,11 @@ async def detect_model(url: str, api_key: str | None) -> str:
         return r.json()["data"][0]["id"]
 
 
+UNMANAGED_LIMIT = 100_000
+
+
 async def one_run(args, store: MetricsStore, label: str, fixed: int | None, seed: int, outdir: Path,
-                  explore: bool = True) -> dict:
+                  explore: bool = True, unmanaged: bool = False) -> dict:
     sim_clock = None
     endpoints = []
     if args.simulate:
@@ -135,20 +139,25 @@ async def one_run(args, store: MetricsStore, label: str, fixed: int | None, seed
         model = args.model or await detect_model(urls[0], args.api_key)
         backends = [
             (f"{args.name_prefix}{i}", OpenAICompatibleBackend(u, model, api_key=args.api_key,
-                                                               temperature=args.temperature))
+                                                               temperature=args.temperature,
+                                                               max_connections=1024 if unmanaged else 64))
             for i, u in enumerate(urls)
         ]
         clock = time.monotonic
 
     for name, backend in backends:
-        if fixed is not None:
+        if unmanaged:
+            # Baseline: no limits and no prompt-token budget; every ready task goes
+            # straight to the server, round-robin, and vLLM queues what it can't run.
+            endpoints.append(Endpoint(name, backend, max_concurrency=UNMANAGED_LIMIT))
+        elif fixed is not None:
             endpoints.append(Endpoint(name, backend, max_concurrency=fixed,
                                       max_prefill_tokens=args.prefill_budget))
         else:
             ctrl = store.controller(name, initial=4, max_limit=args.max_limit, clock=clock, explore=explore)
             endpoints.append(Endpoint(name, backend, controller=ctrl, max_prefill_tokens=args.prefill_budget))
 
-    pool = BackendPool(endpoints, clock=clock)
+    pool = BackendPool(endpoints, strategy="round_robin" if unmanaged else "prefix", clock=clock)
     graph = build_graph(args.teams, seed, scale=args.scale)
     try:
         report = await Scheduler(pool, max_concurrency=pool.capacity, clock=clock).run(graph)
@@ -158,7 +167,7 @@ async def one_run(args, store: MetricsStore, label: str, fixed: int | None, seed
     run_id = store.save_run(report, pool if fixed is None else None, label=label)
     timeline = write_timeline(report, outdir / f"timeline-run{run_id}.html", title=f"Run {run_id}: {label}")
     limits = {
-        e.name: e.controller.best[0] if e.controller and e.controller.best else e.limit
+        e.name: "none" if unmanaged else e.controller.best[0] if e.controller and e.controller.best else e.limit
         for e in pool.endpoints
     }
     failed = [r for r in report.records.values() if r.error and r.state.value == "failed"]
@@ -185,6 +194,9 @@ async def main() -> None:
     ap.add_argument("--seed", type=int, default=0, help="workload seed (same for every run, so runs compare fairly)")
     ap.add_argument("--scale", type=float, default=1.0, help="multiply output lengths")
     ap.add_argument("--limits", default="", help="fixed per-GPU limits to try first, e.g. 4,8,16,32")
+    ap.add_argument("--unmanaged", action="store_true",
+                    help="first run a baseline with no limits, no prompt budget and round-robin routing "
+                         "(tasks still start as soon as their dependencies finish)")
     ap.add_argument("--adaptive-runs", type=int, default=3, help="adaptive runs (first learns, later ones warm)")
     ap.add_argument("--max-limit", type=int, default=64)
     ap.add_argument("--prefill-budget", type=int, default=16_000, help="uncached prompt tokens in flight per GPU")
@@ -206,6 +218,8 @@ async def main() -> None:
     with MetricsStore(args.db) as store:
         where = "simulated cards" if args.simulate else ", ".join(endpoint_urls(args))
         print(f"benchmarking {args.teams} agent teams per run on {where}\n")
+        if args.unmanaged:
+            rows.append(await one_run(args, store, "unmanaged", None, args.seed, outdir, unmanaged=True))
         for limit in fixed_limits:
             rows.append(await one_run(args, store, f"fixed {limit}", limit, args.seed, outdir))
         for i in range(args.adaptive_runs):
@@ -214,6 +228,7 @@ async def main() -> None:
             # Hold each GPU at the best level it has learned, without exploring.
             rows.append(await one_run(args, store, "learned, frozen", None, args.seed, outdir, explore=False))
         curves = {e: store.load_curve(e) for e in {n for r in rows for n in r["limits"]}}
+        curves = {e: c for e, c in curves.items() if c}
 
     (outdir / "summary.json").write_text(json.dumps({"runs": rows, "curves": curves}, indent=2))
     print("\nrun  label             makespan   tok/s   per-GPU limit")

@@ -83,3 +83,15 @@ def test_bench_simulate_mode(tmp_path, monkeypatch):
     ])
     asyncio.run(bench.main())
     assert json.loads((tmp_path / "out" / "summary.json").read_text())["runs"]
+
+
+def test_bench_unmanaged_baseline(servers, tmp_path, monkeypatch):
+    bench = load_bench()
+    monkeypatch.setattr(sys, "argv", [
+        "bench.py", "--endpoints", ",".join(servers), "--teams", "3", "--unmanaged", "--adaptive-runs", "0",
+        "--db", str(tmp_path / "b.db"), "--out", str(tmp_path / "out"),
+    ])
+    asyncio.run(bench.main())
+    runs = json.loads((tmp_path / "out" / "summary.json").read_text())["runs"]
+    assert [r["label"] for r in runs] == ["unmanaged"]
+    assert set(runs[0]["limits"].values()) == {"none"}
