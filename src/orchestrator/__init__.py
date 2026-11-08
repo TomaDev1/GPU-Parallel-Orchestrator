@@ -11,12 +11,17 @@ from .backends import (
     prefix_key_for,
 )
 from .graph import CycleError, Task, TaskGraph, TaskState
+from .metrics import MetricsStore
 from .presets import QWEN27B_RTX3080_20GB
 from .routing import BackendPool, Endpoint
 from .scheduler import RunReport, Scheduler, TaskRecord
 from .spawn import Spawner
+from .timeline import render_timeline, write_timeline
 
 __all__ = [
+    "MetricsStore",
+    "render_timeline",
+    "write_timeline",
     "QWEN27B_RTX3080_20GB",
     "AdaptiveLimit",
     "LimitSample",

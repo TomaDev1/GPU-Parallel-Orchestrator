@@ -69,6 +69,7 @@ async def run(strategy: str) -> None:
     pool = BackendPool(
         [Endpoint(f"gpu{i}", s, max_concurrency=16) for i, s in enumerate(sims)],
         strategy=strategy,
+        clock=clock.now,
     )
     report = await Scheduler(pool, max_concurrency=pool.capacity, clock=clock.now).run(build_graph())
     hits = sum(s.cache_hits for s in sims)

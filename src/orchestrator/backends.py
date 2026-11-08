@@ -52,6 +52,8 @@ class Completion:
     ttft: float | None = None
     # Which backend served the request (set by BackendPool).
     endpoint: str | None = None
+    # Time spent waiting inside a BackendPool for a server slot (seconds).
+    queue_wait: float = 0.0
     # Prompt tokens served from the prefix cache (simulator only).
     cached_tokens: int = 0
 
