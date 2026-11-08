@@ -42,6 +42,19 @@ GPU_MEM="${GPU_MEM:-0.92}"
 KV_DTYPE="${KV_DTYPE:-auto}"
 SERVED_NAME="${SERVED_NAME:-qwen}"
 
+# Refuse to start on GPUs that something else is already using (for example a
+# cloud template's own vLLM server): vLLM would fail later with a less obvious
+# "Free memory on device ... is less than desired" error.
+busy=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits 2>/dev/null \
+  | awk -F', *' -v n="$NUM_GPUS" '$1 < n && $2 > 2000 {print "  GPU " $1 ": " $2 " MiB in use"}')
+if [[ -n "$busy" && -z "${FORCE:-}" ]]; then
+  echo "Some GPUs are already in use:" >&2
+  echo "$busy" >&2
+  echo "Stop whatever holds them first (check 'nvidia-smi', 'supervisorctl status'," >&2
+  echo "or run '$0 stop'), or set FORCE=1 to start anyway." >&2
+  exit 1
+fi
+
 # Download once up front, so four servers don't race to fetch the same files.
 if [[ ! -d "$MODEL" ]]; then
   echo "downloading $MODEL (skipped if already cached)..."
