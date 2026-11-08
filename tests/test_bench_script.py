@@ -95,3 +95,16 @@ def test_bench_unmanaged_baseline(servers, tmp_path, monkeypatch):
     runs = json.loads((tmp_path / "out" / "summary.json").read_text())["runs"]
     assert [r["label"] for r in runs] == ["unmanaged"]
     assert set(runs[0]["limits"].values()) == {"none"}
+
+
+def test_bench_reports_prefix_cache_rate_and_sim_batch_slots(tmp_path, monkeypatch, capsys):
+    bench = load_bench()
+    monkeypatch.setattr(sys, "argv", [
+        "bench.py", "--simulate", "--teams", "2", "--limits", "8", "--adaptive-runs", "0",
+        "--sim-max-batch", "4", "--time-scale", "5000",
+        "--db", str(tmp_path / "b.db"), "--out", str(tmp_path / "out"),
+    ])
+    asyncio.run(bench.main())
+    run = json.loads((tmp_path / "out" / "summary.json").read_text())["runs"][0]
+    assert 0 < run["prefix_cache_hit_rate"] < 1
+    assert "prefix cache" in capsys.readouterr().out

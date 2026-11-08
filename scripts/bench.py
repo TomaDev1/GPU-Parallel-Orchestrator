@@ -131,7 +131,8 @@ async def one_run(args, store: MetricsStore, label: str, fixed: int | None, seed
     if args.simulate:
         sim_clock = SimClock(time_scale=args.time_scale, tick=0.1)
         backends = [
-            (f"sim{i}", SimulatedBackend(clock=sim_clock, **QWEN27B_RTX3080_20GB)) for i in range(args.gpus)
+            (f"sim{i}", SimulatedBackend(clock=sim_clock, **{**QWEN27B_RTX3080_20GB, "max_batch": args.sim_max_batch}))
+            for i in range(args.gpus)
         ]
         clock = sim_clock.now
     else:
@@ -176,6 +177,7 @@ async def one_run(args, store: MetricsStore, label: str, fixed: int | None, seed
     row = {
         "run": run_id, "label": label, "tasks": len(report.records), "makespan_s": round(report.makespan, 1),
         "tok_per_s": round(report.throughput, 1), "peak_in_flight": report.peak_in_flight,
+        "prefix_cache_hit_rate": report.cache_hit_rate,
         "limits": limits, "timeline": str(timeline),
     }
     print(f"  run {run_id} {label:<16} {report.summary()}")
@@ -197,6 +199,8 @@ async def main() -> None:
     ap.add_argument("--unmanaged", action="store_true",
                     help="first run a baseline with no limits, no prompt budget and round-robin routing "
                          "(tasks still start as soon as their dependencies finish)")
+    ap.add_argument("--sim-max-batch", type=int, default=0,
+                    help="simulated batch slots per card (0 = unlimited); vLLM's --max-num-seqs")
     ap.add_argument("--adaptive-runs", type=int, default=3, help="adaptive runs (first learns, later ones warm)")
     ap.add_argument("--max-limit", type=int, default=64)
     ap.add_argument("--prefill-budget", type=int, default=16_000, help="uncached prompt tokens in flight per GPU")
