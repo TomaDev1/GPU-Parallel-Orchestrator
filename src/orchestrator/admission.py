@@ -82,9 +82,15 @@ class AdaptiveLimit:
         self._explore = [1, 0, -1, 0]  # tune cycle: up, center, down, center
         self._explore_i = 0
         if self.curve:
-            # Warm start: skip probing and begin at the best known level.
-            self.phase = "tune"
-            self._center = self.limit = self._clamp(self.best_level())
+            # Warm start at the best known level. If that level is also the
+            # highest ever measured, the peak may lie beyond it (the last run
+            # ended mid-probe), so keep probing upward from there.
+            best = self._clamp(self.best_level())
+            self._center = self.limit = best
+            if best >= max(self.curve) and best < self.max_limit:
+                self._best_probe = self.curve[self.best_level()]
+            else:
+                self.phase = "tune"
         self._begin_settle()
 
     def _clamp(self, n: int) -> int:

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
@@ -86,6 +87,7 @@ class BackendPool:
         prefixes_per_endpoint: int = 64,
         max_imbalance: int = 4,
         chars_per_token: float = 4.0,
+        clock=time.monotonic,
     ) -> None:
         if not endpoints:
             raise ValueError("BackendPool needs at least one endpoint")
@@ -99,6 +101,7 @@ class BackendPool:
         self.prefixes_per_endpoint = prefixes_per_endpoint
         self.max_imbalance = max_imbalance
         self.chars_per_token = chars_per_token
+        self.clock = clock  # used to report time spent queued in the pool
         self._rr = itertools.cycle(range(len(endpoints)))
         self._cond: asyncio.Condition | None = None
         self.affinity_hits = 0
@@ -158,9 +161,11 @@ class BackendPool:
 
     async def complete(self, request: Request) -> Completion:
         cond = self._condition()
+        queued_at = self.clock()
         async with cond:
             while (ep := self.choose(request)) is None:
                 await cond.wait()
+            queue_wait = self.clock() - queued_at
             prefill = self.uncached_prompt_tokens(ep, request)
             ep.in_flight += 1
             ep.prefill_in_flight += prefill
@@ -171,6 +176,7 @@ class BackendPool:
         try:
             completion = await ep.backend.complete(request)
             completion.endpoint = ep.name
+            completion.queue_wait = queue_wait
             output_tokens = completion.output_tokens
             ep.served += 1
             return completion

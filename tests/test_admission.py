@@ -90,6 +90,11 @@ def test_plateau_prefers_lowest_level():
     assert ctrl.phase == "tune" and ctrl.limit == 16  # warm start skips probing
 
 
+def test_warm_start_resumes_probe_if_peak_not_confirmed():
+    ctrl = AdaptiveLimit(initial_curve={4: 100.0, 8: 190.0}, max_limit=64)
+    assert ctrl.phase == "probe" and ctrl.limit == 8
+
+
 def test_low_demand_does_not_move_limit():
     clock = FakeClock()
     ctrl = AdaptiveLimit(initial=16, samples_per_step=2, clock=clock)

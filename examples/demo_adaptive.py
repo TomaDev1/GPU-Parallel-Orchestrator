@@ -52,7 +52,7 @@ def build_graph() -> TaskGraph:
 async def run(label: str, make_endpoint, sim_kwargs: dict) -> None:
     clock = SimClock(time_scale=2000, tick=0.1)
     sims = [SimulatedBackend(clock=clock, **sim_kwargs) for _ in range(4)]
-    pool = BackendPool([make_endpoint(f"gpu{i}", s, clock) for i, s in enumerate(sims)])
+    pool = BackendPool([make_endpoint(f"gpu{i}", s, clock) for i, s in enumerate(sims)], clock=clock.now)
     report = await Scheduler(pool, max_concurrency=pool.capacity, clock=clock.now).run(build_graph())
     extra = ""
     ctrl = pool.endpoints[0].controller

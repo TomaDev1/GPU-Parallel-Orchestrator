@@ -42,6 +42,7 @@ class TaskRecord:
     cached_tokens: int = 0
     endpoint: str | None = None
     parent: str | None = None
+    deps: tuple[str, ...] = ()
     error: str | None = None
 
     @property
@@ -78,6 +79,56 @@ class RunReport:
     def throughput(self) -> float:
         """Aggregate output tokens per second over the whole run."""
         return self.total_output_tokens / self.makespan if self.makespan > 0 else 0.0
+
+    def critical_path(self) -> list[str]:
+        """The chain of tasks that actually determined when the run finished.
+
+        Start from the task that finished last; repeatedly step to whichever
+        of its dependencies finished last (the one it was really waiting
+        for). Where a task started well after its last dependency finished,
+        it was waiting for a free slot rather than for data, and the gap
+        shows up as queue wait on that task.
+        """
+        done = {k: r for k, r in self.records.items() if r.finished_at is not None}
+        if not done:
+            return []
+        current = max(done.values(), key=lambda r: r.finished_at)
+        path = [current.task_id]
+        while True:
+            deps = [done[d] for d in current.deps if d in done]
+            if not deps:
+                break
+            current = max(deps, key=lambda r: r.finished_at)
+            path.append(current.task_id)
+        return path[::-1]
+
+    def to_dict(self) -> dict:
+        return {
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "makespan": self.makespan,
+            "throughput": self.throughput,
+            "peak_in_flight": self.peak_in_flight,
+            "critical_path": self.critical_path(),
+            "tasks": [
+                {
+                    "task_id": r.task_id,
+                    "state": r.state.value,
+                    "parent": r.parent,
+                    "deps": list(r.deps),
+                    "endpoint": r.endpoint,
+                    "ready_at": r.ready_at,
+                    "started_at": r.started_at,
+                    "finished_at": r.finished_at,
+                    "wait": r.wait,
+                    "prompt_tokens": r.prompt_tokens,
+                    "output_tokens": r.output_tokens,
+                    "cached_tokens": r.cached_tokens,
+                    "error": r.error,
+                }
+                for r in self.records.values()
+            ],
+        }
 
     def count(self, state: TaskState) -> int:
         return sum(1 for r in self.records.values() if r.state is state)
@@ -117,7 +168,7 @@ class Scheduler:
 
         def record(task: Task) -> TaskRecord:
             if task.id not in records:
-                records[task.id] = TaskRecord(task.id, task.state)
+                records[task.id] = TaskRecord(task.id, task.state, deps=tuple(task.deps))
             return records[task.id]
 
         def push(task: Task) -> None:
@@ -204,6 +255,10 @@ class Scheduler:
         rec.output_tokens = completion.output_tokens
         rec.cached_tokens = completion.cached_tokens
         rec.endpoint = completion.endpoint
+        # Time queued inside a BackendPool counts as waiting, not running.
+        # (Assumes the pool and the scheduler use the same clock.)
+        if completion.queue_wait and rec.started_at is not None:
+            rec.started_at = min(rec.started_at + completion.queue_wait, rec.finished_at)
         rec.state = TaskState.SUCCEEDED
         for child in graph.mark_succeeded(task, completion.text):
             push(child)

@@ -10,7 +10,7 @@ agents running at once.
 
 ## Status
 
-**Step 3 of 4 done.** Built and tested against simulated servers. The target
+**All 4 planned steps done.** Built and tested against simulated servers. The target
 setup is an EPYC workstation with 4× RTX 3080 20GB, each running its own copy
 of Qwen3.8-27B at 4-bit. It isn't built yet.
 
@@ -19,7 +19,7 @@ of Qwen3.8-27B at 4-bit. It isn't built yet.
 | 1 | Task graph, dependency-driven scheduler, backend interface, simulator | done |
 | 2 | Multiple servers (one per GPU), prefix-aware routing, subagent spawning API | done |
 | 3 | Adaptive admission controller: tune concurrency per server from measured throughput; separate prompt-token budget | done |
-| 4 | Per-task metrics store and timeline view; save learned speed curves between runs | next |
+| 4 | SQLite metrics store, learned curves saved between runs, critical-path analysis, HTML timeline | done |
 
 ## How it works
 
@@ -60,6 +60,17 @@ objective ──> TaskGraph (DAG) ──> Scheduler ──> BackendPool ──�
 - **Prompt budget**: `Endpoint(max_prefill_tokens=...)` caps uncached prompt
   tokens in flight per server. Prompt processing doesn't speed up with
   batching, so this stops a burst of long prompts stalling generation.
+- **MetricsStore** saves every run to SQLite: per-task timings, which
+  server ran each task, controller history, and each server's learned speed
+  curve. `store.controller("gpu0")` returns a controller warm-started from
+  that curve, so only the first run pays for probing.
+- **Critical path**: `report.critical_path()` walks back from the last task
+  to finish through whichever dependency it was really waiting on. That
+  chain decided the total time, so it's where splitting work or giving
+  priority pays off.
+- **Timeline**: `write_timeline(report, "timeline.html")` writes a single
+  HTML file. It shows each server's tasks over time, how long each waited
+  for a slot, and the critical path highlighted.
 - **Backends** expose `async complete(request)`:
   - `OpenAICompatibleBackend` calls `/chat/completions` on any compatible server.
   - `SimulatedBackend` is a fake continuous-batching server for development
@@ -75,6 +86,7 @@ python -m pytest
 python examples/demo_simulated.py      # no GPU needed
 python examples/demo_multi_gpu.py      # 4 simulated cards, routing strategies compared
 python examples/demo_adaptive.py       # adaptive concurrency vs fixed limits
+python examples/demo_metrics.py        # two runs with a metrics DB, then timeline.html
 python examples/demo_server.py --base-url http://localhost:8000/v1 --model <name>
 ```
 
@@ -90,6 +102,25 @@ pool = BackendPool([
 ])
 report = await Scheduler(pool, max_concurrency=pool.capacity).run(graph)
 ```
+
+With metrics and warm-started controllers:
+
+```python
+from orchestrator import MetricsStore, write_timeline
+
+with MetricsStore("metrics.db") as store:
+    pool = BackendPool([
+        Endpoint(f"gpu{i}", OpenAICompatibleBackend(f"http://localhost:{8000 + i}/v1", "qwen"),
+                 controller=store.controller(f"gpu{i}", max_limit=64))
+        for i in range(4)
+    ])
+    report = await Scheduler(pool, max_concurrency=pool.capacity).run(graph)
+    store.save_run(report, pool, label="research batch")
+write_timeline(report, "timeline.html")
+```
+
+Keep endpoint names stable: they're the key for saved curves. Use new names
+(or a new database) after changing the model or quantisation.
 
 A single simulated server:
 
@@ -164,3 +195,14 @@ short, which is why step 4 saves learned curves between runs. The 27B preset
 (`orchestrator.presets`) is scaled from third-party RTX 3090 reports, with
 an assumed ~30k-token KV cache per card. In that estimate the KV cache, not
 compute, caps useful concurrency at around 16 per card.
+
+## When the hardware arrives
+
+1. Start one vLLM (or llama.cpp) server per card, on ports 8000-8003, each
+   pinned to its GPU with `CUDA_VISIBLE_DEVICES`.
+2. Run a representative job through a `BackendPool` with `store.controller(...)`
+   per card, and save it with `MetricsStore`. The first run probes; later
+   runs start warm.
+3. Open the timeline to see where tasks waited, and compare the learned
+   curves against the simulator presets. Then replace the presets with the
+   real numbers.
