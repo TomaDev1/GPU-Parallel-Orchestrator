@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica,Arial,sans-serif" font-size="12">
+<rect width="760" height="300" fill="#ffffff"/>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6b6b70"/></marker></defs>
+<text x="16" y="28" font-size="16" fill="#1d1d1f">Three ways to serve one model on 4 GPUs</text>
+<rect x="16" y="44" width="240" height="236" rx="8" fill="#f6f5f2" stroke="#e2e0da"/>
+<text x="136.0" y="68" text-anchor="middle" font-size="13" fill="#1d1d1f" font-weight="bold">4 copies, 1 per GPU</text>
+<rect x="76.0" y="80" width="120" height="26" rx="5" fill="#ffffff" stroke="#9a9aa2"/><text x="136.0" y="97" text-anchor="middle" fill="#1d1d1f">coordinator</text>
+<rect x="24.0" y="140" width="56.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="52.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="136.0" y1="106" x2="52.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<rect x="80.0" y="140" width="56.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="108.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="136.0" y1="106" x2="108.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<rect x="136.0" y="140" width="56.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="164.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="136.0" y1="106" x2="164.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<rect x="192.0" y="140" width="56.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="220.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="136.0" y1="106" x2="220.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<rect x="27.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="52.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 0</text>
+<rect x="83.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="108.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 1</text>
+<rect x="139.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="164.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 2</text>
+<rect x="195.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="220.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 3</text>
+<text x="136.0" y="250" text-anchor="middle" fill="#2b7bd6">Measured on 4x 3090: 177-183s</text>
+<text x="136.0" y="268" text-anchor="middle" fill="#6b6b70" font-size="11">Best when one card has KV room to spare</text>
+<rect x="264" y="44" width="240" height="236" rx="8" fill="#f6f5f2" stroke="#e2e0da"/>
+<text x="384.0" y="68" text-anchor="middle" font-size="13" fill="#1d1d1f" font-weight="bold">2 servers x 2 GPUs (TP2)</text>
+<rect x="324.0" y="80" width="120" height="26" rx="5" fill="#ffffff" stroke="#9a9aa2"/><text x="384.0" y="97" text-anchor="middle" fill="#1d1d1f">coordinator</text>
+<rect x="272.0" y="140" width="112.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="328.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="384.0" y1="106" x2="328.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<text x="384.0" y="226" text-anchor="middle" fill="#b3261e" font-size="11">each pair syncs every step over PCIe</text>
+<rect x="384.0" y="140" width="112.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="440.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="384.0" y1="106" x2="440.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<rect x="275.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="300.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 0</text>
+<rect x="331.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="356.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 1</text>
+<rect x="387.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="412.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 2</text>
+<rect x="443.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="468.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 3</text>
+<text x="384.0" y="250" text-anchor="middle" fill="#1d1d1f">Not measured yet</text>
+<text x="384.0" y="268" text-anchor="middle" fill="#6b6b70" font-size="11">First choice for 27B on 20GB cards</text>
+<rect x="512" y="44" width="240" height="236" rx="8" fill="#f6f5f2" stroke="#e2e0da"/>
+<text x="632.0" y="68" text-anchor="middle" font-size="13" fill="#1d1d1f" font-weight="bold">1 server x 4 GPUs (TP4, stock)</text>
+<rect x="572.0" y="80" width="120" height="26" rx="5" fill="#ffffff" stroke="#9a9aa2" stroke-dasharray="4 3"/><text x="632.0" y="97" text-anchor="middle" fill="#6b6b70">client (any)</text>
+<rect x="520.0" y="140" width="224.0" height="30" rx="5" fill="#ffffff" stroke="#2b7bd6"/><text x="632.0" y="159" text-anchor="middle" fill="#2b7bd6">vLLM</text>
+<line x1="632.0" y1="106" x2="632.0" y2="138" stroke="#6b6b70" marker-end="url(#a)"/>
+<text x="632.0" y="226" text-anchor="middle" fill="#b3261e" font-size="11">all 4 sync every step over PCIe</text>
+<rect x="523.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="548.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 0</text>
+<rect x="579.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="604.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 1</text>
+<rect x="635.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="660.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 2</text>
+<rect x="691.0" y="178" width="50" height="32" rx="4" fill="#e9e7e1"/><text x="716.0" y="198" text-anchor="middle" fill="#1d1d1f">GPU 3</text>
+<text x="632.0" y="250" text-anchor="middle" fill="#1d1d1f">Measured on 4x 3090: 257.6s</text>
+<text x="632.0" y="268" text-anchor="middle" fill="#6b6b70" font-size="11">Most KV room, slowest without NVLink</text>
+</svg>
