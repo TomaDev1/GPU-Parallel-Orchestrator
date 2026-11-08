@@ -215,6 +215,11 @@ class SimulatedBackend:
     prefilled, later requests with the same key skip prefilling the system
     prompt (an LRU of ``prefix_cache_size`` prefixes). Set the size to 0 to
     disable.
+
+    KV cache: with ``kv_capacity_tokens`` set, each running request reserves
+    room for its prompt plus its full output. A request that doesn't fit
+    waits inside the server until room frees up, as vLLM does. This is what
+    caps useful concurrency on cards with little VRAM left after the weights.
     """
 
     def __init__(
@@ -227,6 +232,7 @@ class SimulatedBackend:
         chars_per_token: float = 4.0,
         prefix_cache_size: int = 32,
         clock: SimClock | None = None,
+        kv_capacity_tokens: int | None = None,
     ) -> None:
         curve = dict(sorted((speed_curve or DEFAULT_SPEED_CURVE).items()))
         if not curve or min(curve) < 1:
@@ -242,6 +248,9 @@ class SimulatedBackend:
         self._prefix_cache: OrderedDict[str, None] = OrderedDict()
         self.cache_hits = 0
         self.cache_misses = 0
+        self.kv_capacity_tokens = kv_capacity_tokens
+        self._kv_used = 0
+        self._kv_cond: asyncio.Condition | None = None
 
         self._active: list[_Active] = []
         self._slots = asyncio.Semaphore(max_batch) if max_batch else None
@@ -289,6 +298,8 @@ class SimulatedBackend:
             cached = system_tokens if self._cache_lookup(request.prefix_key) else 0
             # The simulator always generates max_tokens; set it to the expected length.
             target = request.max_tokens
+            kv_need = prompt_tokens + target
+            await self._kv_reserve(kv_need)
             act = _Active(
                 request=request,
                 prefill_left=prompt_tokens - cached,
@@ -300,7 +311,10 @@ class SimulatedBackend:
             self._active.append(act)
             self.peak_concurrency = max(self.peak_concurrency, len(self._active))
             self.clock.poke()
-            await act.done
+            try:
+                await act.done
+            finally:
+                await self._kv_release(kv_need)
             self.total_output_tokens += target
             text = f"[simulated output for {request.task_id or 'request'}: {target} tokens]"
             return Completion(
@@ -313,6 +327,24 @@ class SimulatedBackend:
         finally:
             if self._slots:
                 self._slots.release()
+
+    async def _kv_reserve(self, tokens: int) -> None:
+        if self.kv_capacity_tokens is None:
+            return
+        if self._kv_cond is None:
+            self._kv_cond = asyncio.Condition()
+        async with self._kv_cond:
+            # Always admit into an empty server, even if the request is huge.
+            while self._kv_used > 0 and self._kv_used + tokens > self.kv_capacity_tokens:
+                await self._kv_cond.wait()
+            self._kv_used += tokens
+
+    async def _kv_release(self, tokens: int) -> None:
+        if self.kv_capacity_tokens is None or self._kv_cond is None:
+            return
+        async with self._kv_cond:
+            self._kv_used -= tokens
+            self._kv_cond.notify_all()
 
     def _cache_lookup(self, key: str | None) -> bool:
         """Return True on a hit; on a miss, insert the key (evicting LRU)."""
