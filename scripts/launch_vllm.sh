@@ -26,10 +26,29 @@ LOG_DIR="${LOG_DIR:-logs}"
 mkdir -p "$LOG_DIR"
 
 if [[ "${1:-}" == "stop" ]]; then
+  # Each server runs in its own process group (see setsid below), so killing
+  # the group also takes down vLLM's EngineCore child, which otherwise keeps
+  # holding the GPU after the API server exits.
+  pids=()
   for f in "$LOG_DIR"/vllm-gpu*.pid; do
     [[ -e "$f" ]] || continue
-    kill "$(cat "$f")" 2>/dev/null && echo "stopped $(basename "$f" .pid)"
+    pid="$(cat "$f")"
+    if kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; then
+      echo "stopping $(basename "$f" .pid)"
+      pids+=("$pid")
+    fi
     rm -f "$f"
+  done
+  for _ in $(seq 1 20); do
+    alive=0
+    for pid in "${pids[@]}"; do
+      pgrep -g "$pid" > /dev/null 2>&1 && alive=1
+    done
+    [[ $alive -eq 0 ]] && break
+    sleep 1
+  done
+  for pid in "${pids[@]}"; do
+    kill -KILL -- "-$pid" 2>/dev/null || true
   done
   exit 0
 fi
@@ -65,7 +84,7 @@ for ((i = 0; i < NUM_GPUS; i++)); do
   port=$((BASE_PORT + i))
   echo "starting GPU $i on port $port"
   # shellcheck disable=SC2086
-  CUDA_VISIBLE_DEVICES=$i nohup vllm serve "$MODEL" \
+  CUDA_VISIBLE_DEVICES=$i setsid nohup vllm serve "$MODEL" \
     --port "$port" \
     --served-model-name "$SERVED_NAME" \
     --max-model-len "$MAX_MODEL_LEN" \
