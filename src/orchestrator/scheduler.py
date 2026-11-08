@@ -141,7 +141,15 @@ class RunReport:
             f"failed {self.count(TaskState.FAILED)}, cancelled {self.count(TaskState.CANCELLED)} | "
             f"makespan {self.makespan:.2f}s | {self.throughput:.1f} tok/s aggregate | "
             f"peak in flight {self.peak_in_flight} | avg queue wait {avg_wait:.2f}s"
+            + (f" | prefix cache {self.cache_hit_rate:.0%}" if self.cache_hit_rate is not None else "")
         )
+
+    @property
+    def cache_hit_rate(self) -> float | None:
+        """Share of prompt tokens served from the server's prefix cache (None if unknown)."""
+        prompt = sum(r.prompt_tokens or 0 for r in self.records.values())
+        cached = sum(r.cached_tokens or 0 for r in self.records.values())
+        return cached / prompt if prompt and cached else None
 
 
 class Scheduler:
