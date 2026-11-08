@@ -13,6 +13,12 @@
 #   SERVED_NAME     default "qwen" (the model name clients send)
 #   EXTRA_ARGS      anything else to pass to `vllm serve`
 #
+# Vision-language builds (e.g. Qwen3.8 with a vision encoder) reserve memory
+# for image/video inputs. For text-only agent work on 24GB cards, turn that off:
+#   EXTRA_ARGS='--limit-mm-per-prompt {"image":0,"video":0}'
+# Only 4-bit builds made for vLLM (AWQ / GPTQ / W4A16 / compressed-tensors)
+# fit one copy per 24GB card. GGUF repos don't load in vLLM.
+#
 # Logs go to logs/vllm-gpuN.log. Stop everything with: ./scripts/launch_vllm.sh stop
 set -euo pipefail
 
@@ -63,8 +69,13 @@ for ((i = 0; i < NUM_GPUS; i++)); do
   port=$((BASE_PORT + i))
   until curl -sf "http://localhost:$port/v1/models" > /dev/null; do
     if ! kill -0 "$(cat "$LOG_DIR/vllm-gpu$i.pid")" 2>/dev/null; then
-      echo "GPU $i server exited; last log lines:" >&2
-      tail -n 30 "$LOG_DIR/vllm-gpu$i.log" >&2
+      echo "GPU $i server exited. Likely cause (error lines from $LOG_DIR/vllm-gpu$i.log):" >&2
+      grep -nE "Error|error:|out of memory|OutOfMemory|not supported|No available memory|exceeds" \
+        "$LOG_DIR/vllm-gpu$i.log" | grep -v "Failed core proc" | tail -n 15 >&2 || true
+      echo "--- last log lines ---" >&2
+      tail -n 15 "$LOG_DIR/vllm-gpu$i.log" >&2
+      echo "stopping the other servers..." >&2
+      LOG_DIR="$LOG_DIR" "$0" stop >&2
       exit 1
     fi
     sleep 5
