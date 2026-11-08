@@ -198,6 +198,12 @@ compute, caps useful concurrency at around 16 per card.
 
 ## Testing on Vast.ai
 
+**Results from the first run (4× RTX 3090, Qwen3.8-27B INT4):**
+[docs/benchmarks/vast-4x3090.md](docs/benchmarks/vast-4x3090.md). In short:
+one model copy per GPU beat stock 4-GPU vLLM by 1.4×, the KV cache (not the
+coordinator's limits) capped each card at about 20 requests, and on 20GB cards
+two servers of 2 GPUs each is the layout to try first.
+
 You can measure real numbers before your own machine is built by renting a
 4-GPU instance. 4× RTX 3090 is the closest common match: a bit faster than a
 3080 20GB, with more VRAM for KV cache, but the same shape of behaviour.
@@ -245,8 +251,10 @@ adaptive mode earns its keep on long or changing workloads.
 
 ## When the hardware arrives
 
-1. Start one vLLM (or llama.cpp) server per card, on ports 8000-8003, each
-   pinned to its GPU with `CUDA_VISIBLE_DEVICES`.
+1. Start the servers. With Qwen3.8-27B on 20GB cards, one copy per card
+   leaves almost no KV cache room, so try two servers of 2 GPUs each first
+   (see [the Vast results](docs/benchmarks/vast-4x3090.md#what-this-means-for-the-4-rtx-3080-20gb-rig)),
+   and compare against one copy per card.
 2. Run a representative job through a `BackendPool` with `store.controller(...)`
    per card, and save it with `MetricsStore`. The first run probes; later
    runs start warm.

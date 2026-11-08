@@ -1,0 +1,13 @@
+run,layout,coordinator_setting,teams,tasks,makespan_s,output_tok_per_s,peak_in_flight,avg_queue_wait_s,prefix_cache_hit_pct
+1,"4 copies, 1 per GPU",fixed 4,24,239,241.2,401.3,16,33.2,
+2,"4 copies, 1 per GPU",fixed 8,24,239,192.2,503.8,32,34.5,
+3,"4 copies, 1 per GPU",fixed 16,24,239,195.4,495.6,64,23.3,
+4,"4 copies, 1 per GPU",fixed 32,24,239,187.2,517.2,128,4.5,
+5,"4 copies, 1 per GPU",adaptive #1,24,239,193.4,499.7,146,34.7,
+6,"4 copies, 1 per GPU",adaptive #2,24,239,188.6,513.4,160,26.0,
+7,"4 copies, 1 per GPU",adaptive #3,24,239,187.3,517.0,160,28.4,
+8,"4 copies, 1 per GPU","learned, frozen",24,239,183.0,529.2,160,33.5,
+9,"stock vLLM, 1 server TP4",unmanaged,24,239,257.6,375.8,167,0.0,
+10,"4 copies, 1 per GPU",unmanaged,24,239,177.1,546.6,167,0.0,11.9
+11,"4 copies, 1 per GPU",unmanaged,96,972,652.6,602.0,676,0.0,10.8
+12,"4 copies, 1 per GPU",fixed 40,96,972,666.2,589.6,160,93.1,7.2
