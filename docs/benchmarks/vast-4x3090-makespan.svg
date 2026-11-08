@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="Helvetica,Arial,sans-serif" font-size="12">
+<rect width="760" height="400" fill="#ffffff"/>
+<text x="16" y="28" font-size="16" fill="#1d1d1f">One model copy per GPU beat stock 4-GPU vLLM by 1.4x</text>
+<text x="16" y="52" fill="#6b6b70">Time to finish 24 agent teams (239 tasks), seconds. Vast.ai 4x RTX 3090, Qwen3.8-27B INT4, vLLM 0.32</text>
+<text x="292" y="94" text-anchor="end" fill="#1d1d1f">Stock vLLM, 1 server on 4 GPUs (TP4)</text>
+<rect x="300" y="80" width="380.0" height="20" fill="#2b7bd6"/>
+<text x="686.0" y="94" fill="#1d1d1f">257.6s</text>
+<text x="292" y="124" text-anchor="end" fill="#1d1d1f">4 copies, fixed limit 4</text>
+<rect x="300" y="110" width="355.8" height="20" fill="#bdbdb4"/>
+<text x="661.8" y="124" fill="#1d1d1f">241.2s</text>
+<text x="292" y="154" text-anchor="end" fill="#1d1d1f">4 copies, fixed limit 16</text>
+<rect x="300" y="140" width="288.2" height="20" fill="#bdbdb4"/>
+<text x="594.2" y="154" fill="#1d1d1f">195.4s</text>
+<text x="292" y="184" text-anchor="end" fill="#1d1d1f">4 copies, adaptive #1</text>
+<rect x="300" y="170" width="285.3" height="20" fill="#bdbdb4"/>
+<text x="591.3" y="184" fill="#1d1d1f">193.4s</text>
+<text x="292" y="214" text-anchor="end" fill="#1d1d1f">4 copies, fixed limit 8</text>
+<rect x="300" y="200" width="283.5" height="20" fill="#bdbdb4"/>
+<text x="589.5" y="214" fill="#1d1d1f">192.2s</text>
+<text x="292" y="244" text-anchor="end" fill="#1d1d1f">4 copies, adaptive #2</text>
+<rect x="300" y="230" width="278.2" height="20" fill="#bdbdb4"/>
+<text x="584.2" y="244" fill="#1d1d1f">188.6s</text>
+<text x="292" y="274" text-anchor="end" fill="#1d1d1f">4 copies, adaptive #3</text>
+<rect x="300" y="260" width="276.3" height="20" fill="#bdbdb4"/>
+<text x="582.3" y="274" fill="#1d1d1f">187.3s</text>
+<text x="292" y="304" text-anchor="end" fill="#1d1d1f">4 copies, fixed limit 32</text>
+<rect x="300" y="290" width="276.1" height="20" fill="#bdbdb4"/>
+<text x="582.1" y="304" fill="#1d1d1f">187.2s</text>
+<text x="292" y="334" text-anchor="end" fill="#1d1d1f">4 copies, learned limit 8, frozen</text>
+<rect x="300" y="320" width="270.0" height="20" fill="#bdbdb4"/>
+<text x="576.0" y="334" fill="#1d1d1f">183.0s</text>
+<text x="292" y="364" text-anchor="end" fill="#1d1d1f">4 copies, no limits (unmanaged)</text>
+<rect x="300" y="350" width="261.2" height="20" fill="#bdbdb4"/>
+<text x="567.2" y="364" fill="#1d1d1f">177.1s</text>
+</svg>
