@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<rect x="1" y="1" width="758" height="398" rx="12" fill="#ffffff" stroke="#d1d9e0"/>
+<text x="32" y="44" font-size="13" fill="#59636e" letter-spacing="1">PRIMARY BENCHMARK · 4× RTX 3090 · QWEN3.8-27B INT4 · 239 DEPENDENT TASKS</text>
+<text x="32" y="104" font-size="54" font-weight="700" fill="#1a7f37">1.45× faster</text>
+<text x="32" y="136" font-size="17" fill="#1f2328">31.2% less end-to-end completion time than one tensor-parallel vLLM server</text>
+<text x="32" y="204" font-size="16" font-weight="600" fill="#1f2328">TP=4 baseline</text>
+<text x="32" y="224" font-size="13" fill="#59636e">1 vLLM server across 4 GPUs</text>
+<rect x="250" y="180" width="400.0" height="48" rx="6" fill="#a8b1ba"/>
+<text x="662.0" y="212" font-size="22" font-weight="700" fill="#1f2328">257.6s</text>
+<text x="32" y="284" font-size="16" font-weight="600" fill="#1f2328">4 replicas + orchestrator</text>
+<text x="32" y="304" font-size="13" fill="#59636e">4 vLLM servers, 1 GPU each</text>
+<rect x="250" y="260" width="275.0" height="48" rx="6" fill="#2b6cc4"/>
+<text x="537.0" y="292" font-size="22" font-weight="700" fill="#1f2328">177.1s</text>
+<text x="32" y="372" font-size="13" fill="#59636e">End-to-end completion time, lower is better. One run per configuration, identical workload and seed.</text>
+</svg>
