@@ -79,3 +79,27 @@ def test_shared_clock_keeps_backends_in_step():
     asyncio.run(main())
     # Two separate servers in parallel: both finish in ~1s, not 2s.
     assert clock.now() == pytest.approx(1.0, abs=0.05)
+
+
+def test_kv_capacity_queues_requests_inside_server():
+    from orchestrator import SimClock
+
+    be = SimulatedBackend(max_batch=0, kv_capacity_tokens=1000, prefill_tps=1e9,
+                          clock=SimClock(time_scale=1000, tick=0.02))
+
+    async def main():
+        # Each needs ~1 + 300 tokens of KV: only 3 fit at once.
+        await asyncio.gather(*(be.complete(Request("x", max_tokens=300)) for _ in range(7)))
+
+    asyncio.run(main())
+    assert be.peak_concurrency == 3
+    assert be._kv_used == 0
+
+
+def test_kv_capacity_admits_oversized_request_when_empty():
+    from orchestrator import SimClock
+
+    be = SimulatedBackend(kv_capacity_tokens=10, prefill_tps=1e9,
+                          clock=SimClock(time_scale=1000, tick=0.02))
+    asyncio.run(be.complete(Request("x", max_tokens=100)))
+    assert be.peak_concurrency == 1

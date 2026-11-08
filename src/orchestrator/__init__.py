@@ -1,5 +1,6 @@
 """GPU-Parallel-Orchestrator: run dependent LLM tasks as parallel as their dependencies allow."""
 
+from .admission import AdaptiveLimit, LimitSample
 from .backends import (
     Backend,
     Completion,
@@ -10,11 +11,15 @@ from .backends import (
     prefix_key_for,
 )
 from .graph import CycleError, Task, TaskGraph, TaskState
+from .presets import QWEN27B_RTX3080_20GB
 from .routing import BackendPool, Endpoint
 from .scheduler import RunReport, Scheduler, TaskRecord
 from .spawn import Spawner
 
 __all__ = [
+    "QWEN27B_RTX3080_20GB",
+    "AdaptiveLimit",
+    "LimitSample",
     "Backend",
     "BackendPool",
     "Completion",

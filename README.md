@@ -10,15 +10,16 @@ agents running at once.
 
 ## Status
 
-**Step 2 of 4 done.** Built and tested against simulated servers. The target
-workstation (EPYC + 4 GPUs, one model copy per GPU) isn't built yet.
+**Step 3 of 4 done.** Built and tested against simulated servers. The target
+setup is an EPYC workstation with 4× RTX 3080 20GB, each running its own copy
+of Qwen3.8-27B at 4-bit. It isn't built yet.
 
 | Step | What | State |
 |---|---|---|
 | 1 | Task graph, dependency-driven scheduler, backend interface, simulator | done |
 | 2 | Multiple servers (one per GPU), prefix-aware routing, subagent spawning API | done |
-| 3 | Adaptive admission controller: tune concurrency from measured throughput, budget prompt (prefill) tokens separately | next |
-| 4 | Per-task metrics store and timeline view | planned |
+| 3 | Adaptive admission controller: tune concurrency per server from measured throughput; separate prompt-token budget | done |
+| 4 | Per-task metrics store and timeline view; save learned speed curves between runs | next |
 
 ## How it works
 
@@ -48,6 +49,17 @@ objective ──> TaskGraph (DAG) ──> Scheduler ──> BackendPool ──�
   `max_imbalance` requests busier than the least-loaded one. Prompt
   processing doesn't get faster with batching, so processing a long shared
   prompt once per card instead of once per request is a large saving.
+- **AdaptiveLimit** finds each server's best concurrency while it runs.
+  Generation is limited by memory bandwidth, so batching more requests
+  shares each read of the weights across more tokens. That helps until
+  compute saturates or the KV cache fills, and where that happens has to be
+  measured. The controller doubles the limit while measured tokens/s keeps
+  up, then hill-climbs around the best level. Where throughput plateaus it
+  picks the lowest level on the plateau. It can warm-start from a previous
+  run's `curve`, which skips the costly probing phase.
+- **Prompt budget**: `Endpoint(max_prefill_tokens=...)` caps uncached prompt
+  tokens in flight per server. Prompt processing doesn't speed up with
+  batching, so this stops a burst of long prompts stalling generation.
 - **Backends** expose `async complete(request)`:
   - `OpenAICompatibleBackend` calls `/chat/completions` on any compatible server.
   - `SimulatedBackend` is a fake continuous-batching server for development
@@ -62,17 +74,18 @@ pip install -e .[dev]
 python -m pytest
 python examples/demo_simulated.py      # no GPU needed
 python examples/demo_multi_gpu.py      # 4 simulated cards, routing strategies compared
+python examples/demo_adaptive.py       # adaptive concurrency vs fixed limits
 python examples/demo_server.py --base-url http://localhost:8000/v1 --model <name>
 ```
 
 Four servers, one per GPU (for example four vLLM instances on ports 8000-8003):
 
 ```python
-from orchestrator import BackendPool, Endpoint, OpenAICompatibleBackend, Scheduler
+from orchestrator import AdaptiveLimit, BackendPool, Endpoint, OpenAICompatibleBackend, Scheduler
 
 pool = BackendPool([
     Endpoint(f"gpu{i}", OpenAICompatibleBackend(f"http://localhost:{8000 + i}/v1", "qwen"),
-             max_concurrency=16)
+             controller=AdaptiveLimit(max_limit=64), max_prefill_tokens=8000)
     for i in range(4)
 ])
 report = await Scheduler(pool, max_concurrency=pool.capacity).run(graph)
@@ -128,3 +141,26 @@ only the comparison between strategies is meaningful.
 | round robin | 57.1s | 34 / 80 |
 | least loaded | 57.1s | 34 / 80 |
 | **prefix-aware** | **43.4s** | **53 / 80** |
+
+### Adaptive concurrency (`examples/demo_adaptive.py`)
+
+800 agent-style requests (250-2,500 token prompts, 100-500 token answers) on
+4 simulated cards. "Cold" means the controllers start knowing nothing; "warm"
+means they start from the curve they learned in the cold run.
+
+| Limit per card | 27B on 3080 20GB (estimate) | Peaked curve (hypothetical) |
+|---|---|---|
+| fixed 4 | 501.9s | 398.6s |
+| fixed 8 | 286.9s | 230.3s |
+| fixed 16 | **206.4s** | 157.8s |
+| fixed 32 | 209.3s | **142.5s** |
+| fixed 64 | 215.2s | 147.8s |
+| adaptive, cold | 252.4s | 193.5s |
+| adaptive, warm | 213.6s | 147.2s |
+
+Once warm, the controller lands within about 3% of the best fixed limit
+without being told where it is. Cold probing costs 20-35% on a job this
+short, which is why step 4 saves learned curves between runs. The 27B preset
+(`orchestrator.presets`) is scaled from third-party RTX 3090 reports, with
+an assumed ~30k-token KV cache per card. In that estimate the KV cache, not
+compute, caps useful concurrency at around 16 per card.
