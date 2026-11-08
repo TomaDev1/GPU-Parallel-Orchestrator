@@ -95,6 +95,17 @@ def test_warm_start_resumes_probe_if_peak_not_confirmed():
     assert ctrl.phase == "probe" and ctrl.limit == 8
 
 
+def test_explore_false_holds_best_level():
+    clock = FakeClock()
+    ctrl = AdaptiveLimit(initial_curve={4: 100.0, 8: 190.0, 16: 180.0}, explore=False,
+                         samples_per_step=2, clock=clock)
+    assert ctrl.phase == "tune" and ctrl.limit == 8
+    for _ in range(4):
+        feed(ctrl, clock, ctrl.limit, 25)
+        drain(ctrl)
+    assert {s.limit for s in ctrl.history} == {8} and ctrl.limit == 8
+
+
 def test_low_demand_does_not_move_limit():
     clock = FakeClock()
     ctrl = AdaptiveLimit(initial=16, samples_per_step=2, clock=clock)

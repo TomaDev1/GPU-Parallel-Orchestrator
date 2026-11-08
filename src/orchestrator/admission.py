@@ -59,9 +59,12 @@ class AdaptiveLimit:
     samples_per_step: int = 6
     probe_drop: float = 0.15  # stop probing when throughput < best * (1 - this)
     smoothing: float = 0.5  # weight of a new measurement in its limit's average
-    min_fill: float = 0.8  # measurement ignored if average in-flight < limit * this
+    min_fill: float = 0.7  # measurement ignored if average in-flight < limit * this
     plateau: float = 0.05  # levels within this of the best count as equally good
     initial_curve: dict[int, float] | None = None  # warm start from a past run
+    # False: stay at the best known level instead of probing/exploring. Useful
+    # for short, bursty jobs where exploring costs more than it learns.
+    explore: bool = True
     clock: Callable[[], float] = time.monotonic
 
     limit: int = field(init=False)
@@ -87,7 +90,7 @@ class AdaptiveLimit:
             # ended mid-probe), so keep probing upward from there.
             best = self._clamp(self.best_level())
             self._center = self.limit = best
-            if best >= max(self.curve) and best < self.max_limit:
+            if self.explore and best >= max(self.curve) and best < self.max_limit:
                 self._best_probe = self.curve[self.best_level()]
             else:
                 self.phase = "tune"
@@ -159,6 +162,9 @@ class AdaptiveLimit:
 
     def _decide(self, now: float, tps: float) -> None:
         self.history.append(LimitSample(now, self.limit, tps, self.phase))
+        if not self.explore and self.curve:
+            self.limit = self._center = self._clamp(self.best_level())
+            return
 
         if self.phase == "probe":
             self._best_probe = max(self._best_probe, tps)

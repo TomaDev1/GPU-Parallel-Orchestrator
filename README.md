@@ -196,6 +196,53 @@ short, which is why step 4 saves learned curves between runs. The 27B preset
 an assumed ~30k-token KV cache per card. In that estimate the KV cache, not
 compute, caps useful concurrency at around 16 per card.
 
+## Testing on Vast.ai
+
+You can measure real numbers before your own machine is built by renting a
+4-GPU instance. 4× RTX 3090 is the closest common match: a bit faster than a
+3080 20GB, with more VRAM for KV cache, but the same shape of behaviour.
+
+1. **Rent the instance.** Filter for 4 GPUs of the same type, pick a vLLM
+   template (or any recent CUDA image and `pip install vllm`), and give it
+   about 60GB of disk. Connect over SSH and work inside `tmux` so a dropped
+   connection doesn't kill the run.
+2. **Get the code.**
+   ```bash
+   git clone https://github.com/TomaDev1/GPU-Parallel-Orchestrator && cd GPU-Parallel-Orchestrator
+   pip install -e .[dev]
+   ```
+3. **Start one vLLM server per GPU.** Use a 4-bit (AWQ or GPTQ) build of
+   Qwen3.8-27B from Hugging Face. The model downloads once, then four servers
+   start on ports 8000-8003. Logs are in `logs/`.
+   ```bash
+   MODEL=<hf-repo-of-a-4bit-qwen3.8-27b> KV_DTYPE=fp8 ./scripts/launch_vllm.sh
+   ```
+   If a server runs out of memory, lower `MAX_MODEL_LEN` (default 16384) or
+   `GPU_MEM` (default 0.92). For a gated model, set `HF_TOKEN` first.
+4. **Run the benchmark.** Every run uses the same agent workload, so results
+   compare directly.
+   ```bash
+   python scripts/bench.py --limits 4,8,16,32
+   ```
+   This runs the fixed limits, then three adaptive runs (the first one probes
+   and later ones start warm), then one run frozen at each GPU's best learned
+   level. It prints a table and each GPU's learned speed curve. Everything is
+   in `bench-results/` (`summary.json`, a `timeline-runN.html` per run) and
+   `bench.db`.
+5. **Bring the results home** (`scp -r` the folder, or download it through
+   the Vast web UI), then stop the instance with `./scripts/launch_vllm.sh stop`
+   and destroy it in the Vast console so billing stops.
+
+Try `python scripts/bench.py --simulate --limits 8,16,32` locally first to
+see what the output looks like.
+
+What to look for: where each GPU's curve flattens (that's its real
+concurrency limit), whether the frozen learned run matches the best fixed
+limit, and in the timelines, how much of the critical path is waiting rather
+than running. On short jobs, exploring costs more than it gains, so running
+frozen at the learned level is usually the better everyday setting. The
+adaptive mode earns its keep on long or changing workloads.
+
 ## When the hardware arrives
 
 1. Start one vLLM (or llama.cpp) server per card, on ports 8000-8003, each
