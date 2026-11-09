@@ -42,7 +42,7 @@ UNLOCKED_3080 = replace(CARD_3080, name="RTX 3080 20GB unlocked",
 
 
 def base(**kw) -> w.ServerCfg:
-    d = dict(eff=EFF, comm_scale=COMM)
+    d = {"eff": EFF, "comm_scale": COMM}
     d.update(kw)
     return w.ServerCfg(**d)
 
@@ -56,9 +56,9 @@ def tp(k, n, **kw):
     return tuple(base(tp=k, **kw) for _ in range(n))
 
 
-HQ = dict(eff=1.0)  # HyperQwen-patched kernels: the published per-card speeds, no stock-vLLM penalty
-HQ_SPEC = dict(eff=1.0, spec="adaptive")
-HQ_FULL = dict(eff=1.0, spec="adaptive", block=256)  # + prefix caching at fine granularity
+HQ = {"eff": 1.0}  # HyperQwen-patched kernels: the published per-card speeds, no stock-vLLM penalty
+HQ_SPEC = {"eff": 1.0, "spec": "adaptive"}
+HQ_FULL = {"eff": 1.0, "spec": "adaptive", "block": 256}  # + prefix caching at fine granularity
 
 
 def scenarios_3090():

@@ -35,8 +35,7 @@ import heapq
 import math
 import random
 import statistics
-import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------
 # Workload: the same agent teams as scripts/bench.py, in tokens.
@@ -432,7 +431,6 @@ class Scenario:
 
 def simulate(sc: Scenario, teams: int = 24, seed: int = 0, run_seed: int = 0, jitter: float = 0.0,
              out_jitter: float = 0.0) -> dict:
-    rng = random.Random(run_seed)
     team_tasks = build_teams(teams, seed, out_jitter, random.Random(run_seed + 1000))
     cpu_cache: set = set()
     servers = [Server(cfg, f"s{i}", cpu_cache, random.Random(run_seed * 31 + i), jitter)
@@ -591,6 +589,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["calibrate", "report"])
     a = ap.parse_args()
-    import whatif_report  # noqa: F401  (scenarios live next to this file)
+    import whatif_report
 
     whatif_report.main(a.cmd)
